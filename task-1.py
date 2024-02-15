@@ -1,15 +1,23 @@
 """Remarques
 
 L'entrainement ne semble pas fonctionner: modifier la valeur de la source ne 
-change rien aux resultats obtenus. De plus, il semble y avoir un pb avec le point 
-(x,y)=(0,0) car les valeurs en ce point different constamment des valeurs des autres points 
-et ce dans toutes les situations.
+change rien aux resultats obtenus. De plus, il semble y avoir un pb avec le 
+point (x,y)=(0,0) car les valeurs en ce point different constamment des valeurs 
+des autres points et ce dans toutes les situations.
+
+Il y a peut etre trop peut de points d'entrainement: si on voulait qu'il y ait 
+un point d'entrainement tous les 1 m et toutes les 0.1 s il faudrait
+500 * 500 * 100 = 25 000 000 points d'entrainement !
+
+Est-ce que le probleme est bien pose ? Est-ce qu'une condition initiale suffit ?
+Intuitivement je dirais que oui mais c'est a verifier.
 """
 
 import deepxde as dde
-from deepxde.backend import tf
 import numpy as np
-
+import matplotlib.pyplot as plt
+from scipy.interpolate import griddata
+import matplotlib.colors
 
 # Definition des parametres
 Lx = 500
@@ -34,9 +42,9 @@ def pde(p, C):
     p[:, 0] = x; p[:, 1] = y; p[:, 2] = t
     C correspond a C(p) la concentration en p"""
 
-    dC_x = dde.grad.jacobian(C, p, i=0, j=0)
-    dC_y = dde.grad.jacobian(C, p, i=0, j=1)
-    dC_t = dde.grad.jacobian(C, p, i=0, j=2)
+    dC_x = dde.grad.jacobian(C, p, j=0)
+    dC_y = dde.grad.jacobian(C, p, j=1)
+    dC_t = dde.grad.jacobian(C, p, j=2)
 
     dC_xx = dde.grad.hessian(C, p, i=0, j=0)
     dC_yy = dde.grad.hessian(C, p, i=1, j=1)
@@ -85,25 +93,33 @@ model = dde.Model(data, net)
 
 # Entrainement de reseau de neurones
 model.compile("adam", lr=1e-3)
-losshistory, train_state = model.train(iterations=3000)
+losshistory, train_state = model.train(iterations=5000)
 # model.compile("L-BFGS")
 # losshistory, train_state = model.train()
 # dde.saveplot(losshistory, train_state, issave=True, isplot=True)
 
 
 # Test: on affiche le resultat au temps t
-t = 5
-x = geom.uniform_points(1000, True)
+t = 10
+x = geom.uniform_points(250 * 250, True)
 p = np.c_[x, np.array([t] * x.shape[0])]
 y = model.predict(p, operator=pde)
-
-import matplotlib.pyplot as plt
-import matplotlib.colors
 
 cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
     "", ["blue", "violet", "red"]
 )
 
-plt.scatter(x[:, 0], x[:, 1], c=y[:, 0], cmap=cmap)
-plt.colorbar()
+resolution_mesh = 300
+xi = np.linspace(-Lx / 2, Lx / 2, resolution_mesh)
+yi = np.linspace(-Ly / 2, Ly / 2, resolution_mesh)
+xi, yi = np.meshgrid(xi, yi)
+
+zi = griddata((x[:, 0], x[:, 1]), y[:, 0], (xi, yi), method="linear")
+
+plt.figure(figsize=(8, 6))
+plt.pcolormesh(xi, yi, zi, cmap=cmap, shading="auto")
+plt.colorbar(label="Prédiction")
+plt.xlabel("X")
+plt.ylabel("Y")
+plt.title("Distribution des prédictions à t={}".format(t))
 plt.show()

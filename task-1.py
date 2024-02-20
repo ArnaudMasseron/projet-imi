@@ -4,6 +4,9 @@ L'entrainement ne semble pas fonctionner: modifier la valeur de la source ne
 change rien aux resultats obtenus. De plus, il semble y avoir un pb avec le 
 point (x,y)=(0,0) car les valeurs en ce point different constamment des valeurs 
 des autres points et ce dans toutes les situations.
+Modif: En mettant une densite gaussienne a la place d'un dirac pour la source
+alors quand S!=0 deplacer la source a un impact sur la solution. De plus GPT
+m'a dit que numeriquement qque chose de continu est preferable a un Dirac.
 
 Il y a peut etre trop peut de points d'entrainement: si on voulait qu'il y ait 
 un point d'entrainement tous les 1 m et toutes les 0.1 s il faudrait
@@ -11,9 +14,17 @@ un point d'entrainement tous les 1 m et toutes les 0.1 s il faudrait
 
 Est-ce que le probleme est bien pose ? Est-ce qu'une condition initiale suffit ?
 Intuitivement je dirais que oui mais c'est a verifier.
+Modif: En fait ChatGPT m'a dit que pour des equations d'advection diffusion il
+faut quand meme imposer des conditions aux limites afin d'avoir une unique
+solution meme si le bord du domaine ne correspond a rien en particulier.
+Je vais essayer d'imposer la condition que C vaille 0 au bord. Cela
+pourrait bien representer le phenomene physique etudie si on choisit
+D et u assez faibles pour que sur la periode de temps etudiee le polluant
+n'ait pas le temps de sortir du domaine etudie.
 """
 
 import deepxde as dde
+import paddle
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import griddata
@@ -23,10 +34,10 @@ import matplotlib.colors
 Lx = 500
 Ly = 500
 u = np.array([0, 0])  # (ux, uy)
-D = 125**2 / 10  # coeff de diffusion
+D = 50**2 / 10  # coeff de diffusion
 T = 10  # temps final
-coords_S = np.array([Lx / 4, Ly / 4])  # coordonnees de la source
-S = 1000  # valeur de la source
+coords_S = np.array([- Lx / 4, Ly / 4])  # coordonnees de la source
+S = 0  # valeur de la source
 nb_points = 3000  # Ordre de grandeur pour le nombre de points consideres
 
 
@@ -36,10 +47,20 @@ timedomain = dde.geometry.TimeDomain(0, T)
 geomtime = dde.geometry.GeometryXTime(geom, timedomain)
 
 
+def normal_pdf(z, mu):
+    """densite gaussienne reduite (Cov = Id) non normalisee
+    z est un array 2d ou chaque ligne correspond a une position spatiale (x,y)"""
+    res = np.exp(- np.linalg.norm(z - mu, axis=1)**2 / 2)
+    res = paddle.reshape(paddle.to_tensor(res, dtype='float32'), (-1, 1))
+    return res
+
+
 def pde(p, C):
     """residu de l'equadif
     p contient les coordonnes spatiales x, y et le temps t
-    p[:, 0] = x; p[:, 1] = y; p[:, 2] = t
+    ainsi si on s'interesse au point i de coordonnees (xi, yi, ti)
+    il est stocke dans p a la ieme ligne et on a donc
+    p[i, 0] = xi; p[i, 1] = yi; p[i, 2] = ti
     C correspond a C(p) la concentration en p"""
 
     dC_x = dde.grad.jacobian(C, p, j=0)
@@ -54,7 +75,7 @@ def pde(p, C):
         + u[0] * dC_x
         + u[1] * dC_y
         - D * (dC_xx + dC_yy)
-        - np.allclose(p[:, 0:2], coords_S) * S
+        - normal_pdf(p[:, 0:2], coords_S) * S
     )
 
 
@@ -68,7 +89,7 @@ source_points_time = np.c_[
 
 
 def initial_condition(p):
-    return np.allclose(p[:, 0:2], coords_S) * S
+    return normal_pdf(p[:, 0:2], coords_S) * S
 
 
 ic = dde.icbc.IC(geomtime, initial_condition, lambda _, on_initial: on_initial)
